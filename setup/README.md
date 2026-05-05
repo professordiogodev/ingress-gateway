@@ -115,7 +115,7 @@ Installs external-dns into the `external-dns` namespace. It watches:
 - `Ingress` resources → creates DNS records for hostnames in `spec.rules[].host`
 - `HTTPRoute` resources → creates DNS records for hostnames in the Gateway annotation
 
-It only touches records in `ironlabs.online` and won't delete records it didn't create (`policy=upsert-only`).
+It only touches records in `ironlabs.online`. With `policy=sync`, it deletes DNS records when the owning Ingress or Gateway is removed — so lab cleanup also cleans up DNS.
 
 ---
 

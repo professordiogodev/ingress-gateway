@@ -247,7 +247,7 @@ envsubst < ingress-tls.yaml | kubectl delete -f -
 kubectl delete -f apps.yaml
 ```
 
-cert-manager will clean up its internal Certificate, CertificateRequest, and Order objects automatically. The Secret gets deleted with the namespace.
+cert-manager will clean up its internal Certificate, CertificateRequest, and Order objects automatically. The Secret gets deleted with the namespace. external-dns detects the deleted Ingress and removes the Route53 DNS records within a minute or two.
 
 ---
 

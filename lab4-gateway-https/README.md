@@ -347,6 +347,8 @@ envsubst < certificate.yaml | kubectl delete -f -
 kubectl delete -f apps.yaml
 ```
 
+external-dns detects the deleted Gateway and removes the Route53 DNS records within a minute or two. cert-manager cleans up the Certificate and CertificateRequest objects; the Secret is removed with the namespace.
+
 ---
 
 ## Key takeaways
