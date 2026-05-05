@@ -292,6 +292,8 @@ kubectl delete -f apps.yaml
 
 This removes the Ingress resources, apps, and the `lab1` namespace. external-dns detects the deleted Ingress and removes the Route53 DNS records within a minute or two.
 
+> **Run cleanup before starting Lab 2.** Both labs use `YOURNAME.eks.ironlabs.online`. If Lab 1 resources are still running when you apply Lab 2, the two Ingresses will fight over the same hostname and DNS will be unstable.
+
 ---
 
 ## Key takeaways

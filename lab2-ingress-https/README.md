@@ -249,6 +249,8 @@ kubectl delete -f apps.yaml
 
 cert-manager will clean up its internal Certificate, CertificateRequest, and Order objects automatically. The Secret gets deleted with the namespace. external-dns detects the deleted Ingress and removes the Route53 DNS records within a minute or two.
 
+> **Run cleanup before starting Lab 3.** Labs 3 and 4 use the same hostname via a Gateway. If the Lab 2 Ingress is still live, it and the Gateway will conflict over `YOURNAME.eks.ironlabs.online` and DNS will be unstable.
+
 ---
 
 ## Key takeaways
