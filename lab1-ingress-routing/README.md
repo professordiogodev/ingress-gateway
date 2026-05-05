@@ -290,7 +290,7 @@ envsubst < ingress.yaml | kubectl delete -f -
 kubectl delete -f apps.yaml
 ```
 
-This removes the Ingress resources, apps, and the `lab1` namespace. external-dns will remove the DNS records within a minute or two.
+This removes the Ingress resources, apps, and the `lab1` namespace. external-dns detects the deleted Ingress and removes the Route53 DNS records within a minute or two.
 
 ---
 

@@ -304,7 +304,7 @@ envsubst < gateway.yaml | kubectl delete -f -
 kubectl delete -f apps.yaml
 ```
 
-external-dns will remove the DNS records when the Gateway annotation disappears.
+external-dns detects the deleted Gateway and removes the Route53 DNS records within a minute or two.
 
 ---
 

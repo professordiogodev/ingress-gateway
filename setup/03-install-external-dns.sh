@@ -24,7 +24,7 @@ helm upgrade --install external-dns external-dns/external-dns \
   --set "sources[1]=service" \
   --set "sources[2]=gateway-httproute" \
   --set "domainFilters[0]=ironlabs.online" \
-  --set policy=upsert-only \
+  --set policy=sync \
   --set registry=txt \
   --set txtOwnerId="${HOSTED_ZONE_ID}" \
   --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="${EXTDNS_ROLE_ARN}" \
