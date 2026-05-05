@@ -1,0 +1,59 @@
+---
+# PATH-BASED routing: one hostname, different paths go to different apps.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: path-routing
+  namespace: ${STUDENT_NAME}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ${STUDENT_NAME}.eks.ironlabs.online
+      http:
+        paths:
+          - path: /blue
+            pathType: Prefix
+            backend:
+              service:
+                name: app-blue
+                port:
+                  number: 80
+          - path: /green
+            pathType: Prefix
+            backend:
+              service:
+                name: app-green
+                port:
+                  number: 80
+---
+# HOST-BASED (subdomain) routing: different hostnames go to different apps.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: subdomain-routing
+  namespace: ${STUDENT_NAME}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: blue.${STUDENT_NAME}.eks.ironlabs.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-blue
+                port:
+                  number: 80
+    - host: green.${STUDENT_NAME}.eks.ironlabs.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-green
+                port:
+                  number: 80

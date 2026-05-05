@@ -1,0 +1,118 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-blue-html
+  namespace: ${STUDENT_NAME}
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head><title>App Blue</title></head>
+    <body style="background:#1a73e8;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+      <div style="text-align:center">
+        <h1>🔵 App Blue</h1>
+        <p>Namespace: ${STUDENT_NAME}</p>
+        <p>Lab 3 — Gateway API Routing</p>
+      </div>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-blue
+  namespace: ${STUDENT_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-blue
+  template:
+    metadata:
+      labels:
+        app: app-blue
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: app-blue-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-blue
+  namespace: ${STUDENT_NAME}
+spec:
+  selector:
+    app: app-blue
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-green-html
+  namespace: ${STUDENT_NAME}
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head><title>App Green</title></head>
+    <body style="background:#0f9d58;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+      <div style="text-align:center">
+        <h1>🟢 App Green</h1>
+        <p>Namespace: ${STUDENT_NAME}</p>
+        <p>Lab 3 — Gateway API Routing</p>
+      </div>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-green
+  namespace: ${STUDENT_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-green
+  template:
+    metadata:
+      labels:
+        app: app-green
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: app-green-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-green
+  namespace: ${STUDENT_NAME}
+spec:
+  selector:
+    app: app-green
+  ports:
+    - port: 80
+      targetPort: 80
