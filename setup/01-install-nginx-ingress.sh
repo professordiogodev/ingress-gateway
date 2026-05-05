@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Instructor only — installs the NGINX Ingress Controller via Helm.
-# This creates a Network Load Balancer (NLB) on AWS that all students share.
+# Installs the NGINX Ingress Controller on your cluster.
+# Used by Labs 1 and 2.
 set -euo pipefail
 
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
+: "${CLUSTER_NAME:?Set CLUSTER_NAME first (see setup/README.md Step 0)}"
 
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update ingress-nginx
+
+# The NLB annotations tell AWS to create an internet-facing Network Load Balancer.
+# "nlb" = AWS NLB (Layer 4). One NLB will serve all Ingress resources you create.
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx \
   --create-namespace \
@@ -14,7 +18,8 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --set controller.allowSnippetAnnotations=true \
   --wait --timeout=5m
 
+echo ""
 echo "==> NGINX Ingress Controller installed."
-echo "    LoadBalancer hostname:"
+echo "    NLB hostname (CNAME target for your DNS records):"
 kubectl get svc -n ingress-nginx ingress-nginx-controller \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'; echo

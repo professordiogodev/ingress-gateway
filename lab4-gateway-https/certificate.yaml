@@ -1,14 +1,13 @@
 ---
-# cert-manager Certificate resource.
-# This explicitly requests a TLS certificate and stores it in a Secret.
-# The Gateway (gateway-tls.yaml) then references that Secret for TLS termination.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: ${STUDENT_NAME}-tls
-  namespace: ${STUDENT_NAME}
+  name: webapp-tls
+  namespace: lab4
 spec:
-  secretName: ${STUDENT_NAME}-tls-secret
+  # The name of the Secret cert-manager will create.
+  # The Gateway's TLS listener references this exact name.
+  secretName: webapp-tls-secret
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer

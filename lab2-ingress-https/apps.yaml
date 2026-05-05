@@ -1,9 +1,14 @@
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab2
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: webapp-html
-  namespace: ${STUDENT_NAME}
+  namespace: lab2
 data:
   index.html: |
     <!DOCTYPE html>
@@ -12,7 +17,6 @@ data:
     <body style="background:#6200ea;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center">
         <h1>🔒 Secure WebApp</h1>
-        <p>Namespace: ${STUDENT_NAME}</p>
         <p>Lab 2 — Ingress HTTPS</p>
         <p>You are connected over TLS!</p>
       </div>
@@ -23,7 +27,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: webapp
-  namespace: ${STUDENT_NAME}
+  namespace: lab2
 spec:
   replicas: 1
   selector:
@@ -51,7 +55,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: webapp
-  namespace: ${STUDENT_NAME}
+  namespace: lab2
 spec:
   selector:
     app: webapp

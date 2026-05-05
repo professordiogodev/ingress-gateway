@@ -1,15 +1,16 @@
 ---
-# HTTPRoute that redirects HTTP → HTTPS.
-# Attaches to the "http" listener on the Gateway.
+# Attaches to the HTTP listener → redirects all traffic to HTTPS.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: http-redirect
-  namespace: ${STUDENT_NAME}
+  namespace: lab4
 spec:
   parentRefs:
-    - name: ${STUDENT_NAME}-gateway
-      namespace: ${STUDENT_NAME}
+    - name: my-gateway
+      namespace: lab4
+      # sectionName targets a specific listener by its name field.
+      # Without this, the route would attach to both listeners, breaking the redirect.
       sectionName: http
   hostnames:
     - "${STUDENT_NAME}.eks.ironlabs.online"
@@ -20,17 +21,16 @@ spec:
             scheme: https
             statusCode: 301
 ---
-# HTTPRoute for HTTPS traffic.
-# Attaches to the "https" listener on the Gateway.
+# Attaches to the HTTPS listener → forwards traffic to the webapp.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: webapp-https
-  namespace: ${STUDENT_NAME}
+  namespace: lab4
 spec:
   parentRefs:
-    - name: ${STUDENT_NAME}-gateway
-      namespace: ${STUDENT_NAME}
+    - name: my-gateway
+      namespace: lab4
       sectionName: https
   hostnames:
     - "${STUDENT_NAME}.eks.ironlabs.online"

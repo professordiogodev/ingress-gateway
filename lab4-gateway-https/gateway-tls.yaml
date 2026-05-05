@@ -1,17 +1,15 @@
 ---
-# Gateway with two listeners:
-# - port 80 (HTTP) → redirects all traffic to HTTPS
-# - port 443 (HTTPS) → terminates TLS using the cert-manager-issued Secret
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: ${STUDENT_NAME}-gateway
-  namespace: ${STUDENT_NAME}
+  name: my-gateway
+  namespace: lab4
   annotations:
     external-dns.alpha.kubernetes.io/hostname: ${STUDENT_NAME}.eks.ironlabs.online
 spec:
   gatewayClassName: nginx
   listeners:
+    # ── HTTP listener: receives plain HTTP, used only for redirect ─────────────
     - name: http
       port: 80
       protocol: HTTP
@@ -19,15 +17,19 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
+
+    # ── HTTPS listener: terminates TLS using the cert-manager Secret ──────────
     - name: https
       port: 443
       protocol: HTTPS
       hostname: "${STUDENT_NAME}.eks.ironlabs.online"
       tls:
+        # Terminate: the Gateway decrypts TLS and forwards plain HTTP to backends.
+        # Alternative is Passthrough: forwards encrypted traffic to pods (for mTLS).
         mode: Terminate
-        # This Secret is created by cert-manager (see certificate.yaml).
         certificateRefs:
-          - name: ${STUDENT_NAME}-tls-secret
+          # This Secret is created by cert-manager (see certificate.yaml).
+          - name: webapp-tls-secret
       allowedRoutes:
         namespaces:
           from: Same

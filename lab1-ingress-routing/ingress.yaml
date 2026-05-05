@@ -1,11 +1,13 @@
 ---
-# PATH-BASED routing: one hostname, different paths go to different apps.
+# PATH-BASED routing: one hostname, different URL paths → different backends.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: path-routing
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
   annotations:
+    # Strip the path prefix before forwarding to the backend.
+    # Without this, /blue is forwarded as-is but nginx only serves /.
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   ingressClassName: nginx
@@ -28,12 +30,12 @@ spec:
                 port:
                   number: 80
 ---
-# HOST-BASED (subdomain) routing: different hostnames go to different apps.
+# HOST-BASED (subdomain) routing: different hostnames → different backends.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: subdomain-routing
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 spec:
   ingressClassName: nginx
   rules:

@@ -3,19 +3,21 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: webapp-tls
-  namespace: ${STUDENT_NAME}
+  namespace: lab2
   annotations:
-    # Tell cert-manager to automatically issue a certificate from this ClusterIssuer.
-    # The instructor pre-created "letsencrypt-prod" — you just reference it here.
+    # Triggers cert-manager to request a certificate from this ClusterIssuer.
+    # cert-manager watches for this annotation, creates a Certificate object,
+    # solves the DNS-01 challenge via Route53, and stores the cert in a Secret.
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    # Redirect all HTTP traffic to HTTPS automatically.
+    # NGINX returns HTTP 308 for any HTTP request, redirecting to HTTPS.
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
         - ${STUDENT_NAME}.eks.ironlabs.online
-      # cert-manager will create/manage this Secret automatically.
+      # cert-manager creates and manages this Secret automatically.
+      # The name here is the contract: cert-manager writes it, NGINX reads it.
       secretName: ${STUDENT_NAME}-tls-secret
   rules:
     - host: ${STUDENT_NAME}.eks.ironlabs.online

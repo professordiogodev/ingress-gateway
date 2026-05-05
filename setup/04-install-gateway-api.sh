@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Instructor only — installs Gateway API CRDs and NGINX Gateway Fabric.
-# Gateway API is the next-generation standard for routing in Kubernetes,
-# replacing Ingress with a richer, role-oriented model.
+# Installs the Gateway API CRDs and NGINX Gateway Fabric.
+# Used by Labs 3 and 4.
 set -euo pipefail
 
 GATEWAY_API_VERSION="v1.2.1"
 
-echo "==> Installing Gateway API CRDs (standard channel)..."
+# ── Gateway API CRDs ──────────────────────────────────────────────────────────
+# These are the standard Kubernetes resource definitions: GatewayClass, Gateway,
+# HTTPRoute, GRPCRoute, ReferenceGrant, etc. They're the API spec, not a controller.
+# Every Gateway API implementation (NGINX, Envoy, Cilium, Istio) uses the same CRDs.
+echo "==> Installing Gateway API CRDs (standard channel, ${GATEWAY_API_VERSION})..."
 kubectl apply -f \
   "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
 
-echo "==> Installing NGINX Gateway Fabric via Helm (OCI chart)..."
-# The chart is distributed via GitHub Container Registry (OCI), not a Helm repo.
-# The GatewayClass "nginx" is created automatically by the chart.
+# ── NGINX Gateway Fabric ──────────────────────────────────────────────────────
+# This is the controller that implements Gateway API using NGINX.
+# Distributed via GitHub Container Registry (OCI), not a traditional Helm repo.
+# The chart automatically creates a GatewayClass named "nginx".
+echo "==> Installing NGINX Gateway Fabric..."
 helm upgrade --install nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric \
   --namespace nginx-gateway \
   --create-namespace \
@@ -20,7 +25,11 @@ helm upgrade --install nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway
   --set service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-scheme"=internet-facing \
   --wait --timeout=5m
 
+echo ""
 echo "==> Gateway API + NGINX Gateway Fabric installed."
-echo "    Gateway Fabric LoadBalancer hostname:"
+echo "    GatewayClass:"
+kubectl get gatewayclass
+echo ""
+echo "    Gateway Fabric NLB hostname:"
 kubectl get svc -n nginx-gateway \
   -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'; echo

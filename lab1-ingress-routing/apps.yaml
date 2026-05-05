@@ -1,9 +1,14 @@
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab1
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-blue-html
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 data:
   index.html: |
     <!DOCTYPE html>
@@ -12,8 +17,7 @@ data:
     <body style="background:#1a73e8;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center">
         <h1>🔵 App Blue</h1>
-        <p>Namespace: ${STUDENT_NAME}</p>
-        <p>Lab 1 — Ingress Routing</p>
+        <p>Lab 1 — Ingress Path & Subdomain Routing</p>
       </div>
     </body>
     </html>
@@ -22,7 +26,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-blue
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 spec:
   replicas: 1
   selector:
@@ -50,7 +54,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: app-blue
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 spec:
   selector:
     app: app-blue
@@ -62,7 +66,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-green-html
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 data:
   index.html: |
     <!DOCTYPE html>
@@ -71,8 +75,7 @@ data:
     <body style="background:#0f9d58;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center">
         <h1>🟢 App Green</h1>
-        <p>Namespace: ${STUDENT_NAME}</p>
-        <p>Lab 1 — Ingress Routing</p>
+        <p>Lab 1 — Ingress Path & Subdomain Routing</p>
       </div>
     </body>
     </html>
@@ -81,7 +84,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-green
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 spec:
   replicas: 1
   selector:
@@ -109,7 +112,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: app-green
-  namespace: ${STUDENT_NAME}
+  namespace: lab1
 spec:
   selector:
     app: app-green

@@ -1,264 +1,177 @@
 # Lab 1 — Ingress: Path & Subdomain Routing
 
-## What is this lab about?
+## Before this lab
 
-You'll expose two applications to the internet using a single **Kubernetes Ingress** resource. You'll learn two different routing strategies:
-- **Path-based routing**: one hostname, different URL paths go to different apps
-- **Host-based (subdomain) routing**: different hostnames go to different apps
+Make sure you've run all six scripts in [`setup/`](../setup/README.md). You need:
+- NGINX Ingress Controller running in your cluster
+- external-dns running and able to create Route53 records
+- `STUDENT_NAME` exported in your shell
 
-Your apps will be reachable at:
-- `http://YOURNAME.eks.ironlabs.online/blue` → Blue app
-- `http://YOURNAME.eks.ironlabs.online/green` → Green app
-- `http://blue.YOURNAME.eks.ironlabs.online` → Blue app
-- `http://green.YOURNAME.eks.ironlabs.online` → Green app
+```bash
+# Verify the controller is ready
+kubectl get pods -n ingress-nginx
+kubectl get pods -n external-dns
+
+# Set your name if you haven't already
+export STUDENT_NAME=yourname
+```
 
 ---
 
-## Concepts you need to know
+## What is this lab about?
 
-### The problem: one LoadBalancer per app doesn't scale
+You'll expose two applications to the internet using a single **Kubernetes Ingress** resource — without creating a load balancer per app. You'll practice two routing strategies:
 
-Without Ingress, exposing an application requires a **Service of type `LoadBalancer`**. On AWS, each LoadBalancer service provisions a new Network Load Balancer (NLB) — at ~$20/month each. For 50 microservices that's $1,000/month just in load balancers.
+- **Path-based routing**: one hostname, different URL paths go to different apps
+- **Host-based (subdomain) routing**: different subdomains go to different apps
 
-**Ingress** solves this: a single NLB feeds a single **Ingress Controller** (running NGINX in this cluster), which acts as a reverse proxy and routes traffic to the right Service based on the URL.
+By the end, both of these will work from any browser:
+
+```
+http://YOURNAME.eks.ironlabs.online/blue   → Blue app
+http://YOURNAME.eks.ironlabs.online/green  → Green app
+http://blue.YOURNAME.eks.ironlabs.online   → Blue app
+http://green.YOURNAME.eks.ironlabs.online  → Green app
+```
+
+---
+
+## Concepts
+
+### The problem Ingress solves
+
+Without Ingress, exposing an application requires a **Service of type `LoadBalancer`**. In AWS that creates one Network Load Balancer per service — roughly $20/month each. Ten microservices means ten load balancers and a $200/month networking bill before you've written a line of code.
+
+**Ingress** fixes this: a single NLB feeds a single **Ingress Controller** (NGINX in this case), which acts as a reverse proxy and routes incoming requests to the right Service based on hostname and path. One load balancer, as many apps as you like.
 
 ```
 Internet
    │
    ▼
-[NLB] ← single load balancer for the whole cluster
+[NLB] ← one load balancer for your whole cluster
    │
    ▼
 [NGINX Ingress Controller pod]
-   │  reads your Ingress resources
-   ├─── host: YOURNAME.eks.ironlabs.online, path: /blue  ──▶ Service: app-blue
-   ├─── host: YOURNAME.eks.ironlabs.online, path: /green ──▶ Service: app-green
-   ├─── host: blue.YOURNAME.eks.ironlabs.online           ──▶ Service: app-blue
-   └─── host: green.YOURNAME.eks.ironlabs.online          ──▶ Service: app-green
+   │ reads your Ingress resources and routes accordingly
+   ├── host: YOURNAME.eks.ironlabs.online, path /blue  ──▶ app-blue Service
+   ├── host: YOURNAME.eks.ironlabs.online, path /green ──▶ app-green Service
+   ├── host: blue.YOURNAME.eks.ironlabs.online         ──▶ app-blue Service
+   └── host: green.YOURNAME.eks.ironlabs.online        ──▶ app-green Service
 ```
 
 ### Key terms
 
 | Term | What it is |
 |------|-----------|
-| **Ingress** | A Kubernetes resource (YAML) that describes routing rules |
-| **IngressClass** | Tells Kubernetes *which* controller handles this Ingress (we use `nginx`) |
-| **Ingress Controller** | The NGINX pod that reads Ingress rules and proxies traffic |
-| **external-dns** | A controller that watches Ingress resources and auto-creates DNS records in Route53 |
+| **Ingress** | A Kubernetes resource (YAML) describing routing rules |
+| **IngressClass** | Tells Kubernetes which controller handles this Ingress (`nginx` here) |
+| **Ingress Controller** | The NGINX pod that reads Ingress resources and proxies traffic |
+| **external-dns** | Watches your Ingress resources and auto-creates Route53 DNS records |
 
-### What students don't need to install
+### Why `ingressClassName: nginx`?
 
-The instructor has pre-installed everything on the cluster:
-- **NGINX Ingress Controller** — the reverse proxy that handles your Ingress rules
-- **external-dns** — creates DNS records in Route53 automatically when you create an Ingress
-- **cert-manager** — manages TLS certificates (used in Lab 2)
-- **Gateway API + NGINX Gateway Fabric** — used in Labs 3 and 4
-
-You only need `kubectl` configured against this cluster.
+A cluster can run multiple Ingress Controllers (e.g. one for internal traffic, one for external). The `ingressClassName` field is how you say "this NGINX controller should handle this Ingress." If you omit it, the cluster's default IngressClass is used (if one is configured).
 
 ---
 
 ## Step-by-step
 
-### Step 1 — Set your student name
-
-Pick a short lowercase name (no spaces, no dots). This becomes your subdomain.
+### Step 1 — Set your name
 
 ```bash
-# Replace "yourname" with your actual name (e.g. alice, bob, carmen)
+# Lowercase, no spaces, no dots — becomes your DNS subdomain
 export STUDENT_NAME=yourname
 ```
 
-> **Important**: run this export in every terminal tab you open for this lab.
+Run this in every terminal tab you open for this lab.
 
 ---
 
-### Step 2 — Create your namespace
-
-Each student works in their own namespace to avoid collisions.
+### Step 2 — Deploy the two apps
 
 ```bash
-kubectl create namespace $STUDENT_NAME
+kubectl apply -f apps.yaml
 ```
 
----
+This creates the `lab1` namespace, two nginx Deployments, two Services, and two ConfigMaps that supply the HTML. No `envsubst` needed here — the namespace is hardcoded as `lab1`.
 
-### Step 3 — Deploy the two sample apps
+Verify:
 
-Copy the YAML below into a file called `apps.yaml`, then apply it.
+```bash
+kubectl get pods -n lab1
+# Both pods should reach Running state within ~30 seconds
+```
+
+The YAML for the apps looks like this (already in `apps.yaml`):
 
 ```yaml
-# ─── ConfigMap for the Blue app ───────────────────────────────────────────────
-# Provides a simple HTML file that nginx will serve.
-# The colored background makes it immediately obvious which app responded.
+# ─── ConfigMap: supplies the HTML page the blue nginx serves ──────────────────
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-blue-html
-  namespace: YOUR_STUDENT_NAME   # ← replace with your $STUDENT_NAME
+  namespace: lab1   # hardcoded — it's your cluster, no isolation needed
 data:
   index.html: |
-    <!DOCTYPE html>
-    <html>
-    <head><title>App Blue</title></head>
-    <body style="background:#1a73e8;color:#fff;font-family:sans-serif;
-                 display:flex;align-items:center;justify-content:center;
-                 height:100vh;margin:0">
-      <div style="text-align:center">
-        <h1>🔵 App Blue</h1>
-        <p>Lab 1 — Ingress Path & Subdomain Routing</p>
-      </div>
-    </body>
-    </html>
+    <html>... blue page ...</html>
 ---
-# ─── Deployment for the Blue app ─────────────────────────────────────────────
+# ─── Deployment: runs nginx with the blue HTML mounted in ────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-blue
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab1
 spec:
   replicas: 1
-  selector:
-    matchLabels:
-      app: app-blue
-  template:
-    metadata:
-      labels:
-        app: app-blue
-    spec:
-      containers:
-        - name: nginx
-          image: nginx:alpine
-          ports:
-            - containerPort: 80
-          volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html   # nginx serves files from here
-      volumes:
-        - name: html
-          configMap:
-            name: app-blue-html   # mounts the ConfigMap as files
+  ...
 ---
-# ─── ClusterIP Service for the Blue app ──────────────────────────────────────
-# ClusterIP = internal only. The Ingress Controller will forward traffic to it.
-# No LoadBalancer needed here — that's the whole point of Ingress!
+# ─── Service: ClusterIP — internal only, the Ingress Controller will use this ─
+# No LoadBalancer here. The whole point of Ingress is that the controller
+# forwards traffic to ClusterIP services internally.
 apiVersion: v1
 kind: Service
 metadata:
   name: app-blue
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab1
 spec:
   selector:
-    app: app-blue   # matches pods with this label
-  ports:
-    - port: 80
-      targetPort: 80
----
-# ─── Same pattern for the Green app ──────────────────────────────────────────
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-green-html
-  namespace: YOUR_STUDENT_NAME
-data:
-  index.html: |
-    <!DOCTYPE html>
-    <html>
-    <head><title>App Green</title></head>
-    <body style="background:#0f9d58;color:#fff;font-family:sans-serif;
-                 display:flex;align-items:center;justify-content:center;
-                 height:100vh;margin:0">
-      <div style="text-align:center">
-        <h1>🟢 App Green</h1>
-        <p>Lab 1 — Ingress Path & Subdomain Routing</p>
-      </div>
-    </body>
-    </html>
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-green
-  namespace: YOUR_STUDENT_NAME
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: app-green
-  template:
-    metadata:
-      labels:
-        app: app-green
-    spec:
-      containers:
-        - name: nginx
-          image: nginx:alpine
-          ports:
-            - containerPort: 80
-          volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html
-      volumes:
-        - name: html
-          configMap:
-            name: app-green-html
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-green
-  namespace: YOUR_STUDENT_NAME
-spec:
-  selector:
-    app: app-green
+    app: app-blue
   ports:
     - port: 80
       targetPort: 80
 ```
 
-Apply using `envsubst` to substitute your name automatically:
-
-```bash
-# envsubst replaces $STUDENT_NAME in the YAML with your actual name
-envsubst < apps.yaml | kubectl apply -f -
-```
-
-Verify the pods are running:
-
-```bash
-kubectl get pods -n $STUDENT_NAME
-# Expected: two pods in Running state (app-blue and app-green)
-```
-
 ---
 
-### Step 4 — Create the Ingress resources
+### Step 3 — Create the Ingress resources
 
-Copy the YAML below into a file called `ingress.yaml`, then apply it.
+The Ingress YAML uses `${STUDENT_NAME}` in the hostnames, so you need `envsubst`:
+
+```bash
+envsubst < ingress.yaml | kubectl apply -f -
+```
+
+The Ingress YAML (already in `ingress.yaml`):
 
 ```yaml
-# ─── Ingress 1: PATH-BASED routing ────────────────────────────────────────────
-# One hostname, different paths route to different backends.
+# ─── Ingress 1: PATH-BASED ────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: path-routing
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab1
   annotations:
-    # This tells the NGINX controller to strip the path prefix before
-    # forwarding to the backend. Without this, /blue would be forwarded
-    # as /blue to the app, but the app only serves /.
+    # Strip the path prefix before forwarding to the backend.
+    # Without this, /blue is forwarded as /blue but nginx only serves /.
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
-  # Which controller handles this Ingress. "nginx" is pre-installed on this cluster.
-  ingressClassName: nginx
+  ingressClassName: nginx    # must match the IngressClass in your cluster
   rules:
     - host: YOUR_STUDENT_NAME.eks.ironlabs.online
       http:
         paths:
           - path: /blue
-            pathType: Prefix   # matches /blue, /blue/, /blue/anything
+            pathType: Prefix
             backend:
               service:
                 name: app-blue
@@ -272,18 +185,17 @@ spec:
                 port:
                   number: 80
 ---
-# ─── Ingress 2: HOST-BASED (subdomain) routing ────────────────────────────────
-# Different hostnames (subdomains) route to different backends.
-# Note: no rewrite annotation needed here — the app receives / directly.
+# ─── Ingress 2: HOST-BASED (subdomain) ────────────────────────────────────────
+# Different hostnames in spec.rules[] → different backends.
+# No rewrite needed: the root / goes directly to the app.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: subdomain-routing
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab1
 spec:
   ingressClassName: nginx
   rules:
-    # Traffic to blue.YOURNAME.eks.ironlabs.online goes to app-blue
     - host: blue.YOUR_STUDENT_NAME.eks.ironlabs.online
       http:
         paths:
@@ -294,7 +206,6 @@ spec:
                 name: app-blue
                 port:
                   number: 80
-    # Traffic to green.YOURNAME.eks.ironlabs.online goes to app-green
     - host: green.YOUR_STUDENT_NAME.eks.ironlabs.online
       http:
         paths:
@@ -307,79 +218,68 @@ spec:
                   number: 80
 ```
 
-Apply:
+Check the Ingress objects were created and have an address:
 
 ```bash
-envsubst < ingress.yaml | kubectl apply -f -
-```
-
-Check the Ingress objects:
-
-```bash
-kubectl get ingress -n $STUDENT_NAME
-# Watch the ADDRESS column — it will fill in with the NLB hostname.
-# external-dns picks this up and creates DNS records automatically.
+kubectl get ingress -n lab1
+# The ADDRESS column fills in with your NLB hostname.
+# external-dns picks up the hostnames in spec.rules and creates DNS records.
 ```
 
 ---
 
-### Step 5 — Wait for DNS propagation
+### Step 4 — Wait for DNS propagation
 
-external-dns watches your Ingress and creates DNS records in Route53. This takes about 60–90 seconds.
+external-dns detects the new Ingress and creates CNAME records in Route53. This takes about 60–90 seconds.
 
 ```bash
-# Poll until your DNS record resolves
+# Poll until your record resolves
 watch -n5 "nslookup ${STUDENT_NAME}.eks.ironlabs.online"
 ```
 
-When you see an IP address (or the NLB hostname) in the answer, DNS is ready.
+You'll know it's ready when you see an IP address (or the NLB hostname) in the answer section.
 
 ---
 
-### Step 6 — Test path-based routing
+### Step 5 — Test path-based routing
 
 ```bash
-# The /blue path should return the blue app HTML
 curl http://${STUDENT_NAME}.eks.ironlabs.online/blue
-
-# The /green path should return the green app HTML
 curl http://${STUDENT_NAME}.eks.ironlabs.online/green
 ```
 
-Or open in a browser — you'll see a blue or green colored page.
+Open in a browser — you'll see a blue or green colored page.
 
 ---
 
-### Step 7 — Test subdomain routing
+### Step 6 — Test subdomain routing
 
 ```bash
-# The blue subdomain
 curl http://blue.${STUDENT_NAME}.eks.ironlabs.online
-
-# The green subdomain
 curl http://green.${STUDENT_NAME}.eks.ironlabs.online
 ```
 
 ---
 
-## What happened under the hood?
+## What happened under the hood
 
-1. You created two **Ingress** resources with `ingressClassName: nginx`
-2. The **NGINX Ingress Controller** pod detected them and updated its `nginx.conf` to add new `server {}` and `location {}` blocks
-3. **external-dns** detected the hostnames in the Ingress `spec.rules[].host` field and called the Route53 API to create CNAME records pointing to the NLB
-4. Traffic flow: `browser → DNS (Route53 CNAME) → NLB → NGINX pod → app-blue or app-green pod`
+1. You applied two `Ingress` resources with `ingressClassName: nginx`
+2. The NGINX Ingress Controller detected them and updated its internal `nginx.conf` with new `server {}` blocks for your hostnames
+3. external-dns detected the hostnames in `spec.rules[].host` and called Route53 to create CNAME records pointing at your NLB
+4. Traffic: `browser → Route53 CNAME → NLB → NGINX pod → app-blue or app-green pod`
 
-### Bonus: Inspect the generated NGINX config
+### Bonus: See the generated NGINX config
 
 ```bash
 NGINX_POD=$(kubectl get pod -n ingress-nginx \
   -l app.kubernetes.io/component=controller \
   -o jsonpath='{.items[0].metadata.name}')
 
-# Show the server blocks nginx generated from your Ingress
 kubectl exec -n ingress-nginx $NGINX_POD -- \
-  nginx -T 2>/dev/null | grep -A 30 "server_name.*${STUDENT_NAME}"
+  nginx -T 2>/dev/null | grep -A 20 "server_name.*${STUDENT_NAME}"
 ```
+
+You'll see the `server {}` blocks NGINX generated from your Ingress rules.
 
 ---
 
@@ -387,16 +287,19 @@ kubectl exec -n ingress-nginx $NGINX_POD -- \
 
 ```bash
 envsubst < ingress.yaml | kubectl delete -f -
-envsubst < apps.yaml | kubectl delete -f -
-kubectl delete namespace $STUDENT_NAME
+kubectl delete -f apps.yaml
 ```
+
+This removes the Ingress resources, apps, and the `lab1` namespace. external-dns will remove the DNS records within a minute or two.
 
 ---
 
 ## Key takeaways
 
-- **Ingress** is a routing layer, not an application — it proxies, not hosts
-- **IngressClass** decouples routing rules from the controller implementation
+- **Ingress** is a routing layer — one load balancer, many apps
+- **IngressClass** tells Kubernetes which controller handles a given Ingress
 - **Path routing** needs `rewrite-target` to strip the prefix before forwarding
-- **Host routing** lets you run multiple virtual hosts through one load balancer
-- **external-dns** makes DNS automatic — no manual Route53 clicks needed
+- **Host routing** needs distinct values in `spec.rules[].host` — the controller reads the `Host` header
+- **external-dns** makes DNS automatic — hostnames in your Ingress become Route53 records with no manual work
+
+When you're done, continue to [Lab 2 →](../lab2-ingress-https/README.md)

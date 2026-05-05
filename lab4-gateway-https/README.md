@@ -1,113 +1,99 @@
 # Lab 4 — Gateway API: HTTPS with TLS Certificates
 
-## What is this lab about?
+## Before this lab
 
-You'll configure **HTTPS** using Gateway API — combining the TLS automation from Lab 2 with the Gateway API routing model from Lab 3.
+```bash
+# Verify cert-manager and ClusterIssuers are ready
+kubectl get pods -n cert-manager
+kubectl get clusterissuer
 
-You'll learn:
-- How TLS configuration lives on the **Gateway listener** (not on the route)
-- How to use cert-manager's `Certificate` resource explicitly (vs the auto-annotation approach in Lab 2)
-- How to implement HTTP → HTTPS redirect using a declarative `RequestRedirect` filter
-- The `sectionName` field: attaching HTTPRoutes to specific listeners
+# Verify NGINX Gateway Fabric is running
+kubectl get pods -n nginx-gateway
 
-Your app will be reachable at:
-- `https://YOURNAME.eks.ironlabs.online` (HTTPS, real cert)
-- `http://YOURNAME.eks.ironlabs.online` → 301 redirect to HTTPS
+# Set your name if you haven't already
+export STUDENT_NAME=yourname
+```
 
 ---
 
-## Concepts you need to know
+## What is this lab about?
 
-### TLS in Gateway API: it lives on the listener, not the route
+You'll configure **HTTPS** using Gateway API — combining cert-manager's TLS automation from Lab 2 with the Gateway API routing model from Lab 3.
 
-In Lab 2 (Ingress), you put TLS configuration inside the Ingress resource itself:
+```
+https://YOURNAME.eks.ironlabs.online   ← HTTPS, valid cert, TLS terminated at the Gateway
+http://YOURNAME.eks.ironlabs.online    ← 301 redirect to HTTPS
+```
+
+---
+
+## Concepts
+
+### Where TLS config lives: Gateway vs Ingress
+
+In Lab 2, TLS configuration was inside the Ingress resource itself:
 
 ```yaml
-# Lab 2: TLS config in Ingress
+# Lab 2: TLS is part of the Ingress
 spec:
   tls:
     - hosts: [...]
       secretName: my-tls-secret
 ```
 
-In Gateway API, TLS lives on the **Gateway listener**. This is the key design difference:
-
-```
-Gateway (port 443, HTTPS listener)
-  └── tls:
-        mode: Terminate
-        certificateRefs:
-          - name: my-tls-secret   ← Gateway holds the cert config
-
-HTTPRoute (attached to the https listener)
-  └── rules:
-        - backendRefs: [webapp]   ← Route has no TLS knowledge
-```
-
-Why is this better? Because **platform teams control TLS** (what certs are allowed, which protocols, cipher suites) while **developers just attach routes** to TLS-enabled listeners. A developer can't bypass TLS by modifying their HTTPRoute.
-
-### Two Gateway listeners: HTTP and HTTPS
-
-In this lab your Gateway has two listeners:
+In Gateway API, **TLS configuration belongs on the Gateway listener**, not on the HTTPRoute:
 
 ```
 Gateway
-  ├── Listener: http  (port 80)   ← handles HTTP traffic
-  │     └── HTTPRoute: http-redirect  → sends 301 to https://...
-  │
-  └── Listener: https (port 443)  ← handles HTTPS traffic (terminates TLS)
-        └── HTTPRoute: webapp-https → forwards to webapp pod
+  ├── listener: http  (port 80)   ← handles unencrypted traffic
+  └── listener: https (port 443)  ← terminates TLS, holds the cert reference
+        │
+        └── HTTPRoute             ← knows nothing about TLS, just routes
 ```
 
-Traffic flow:
+Why is this better? In a company with a shared cluster, the platform team controls which certificates are allowed at the Gateway level. Application developers attach HTTPRoutes without being able to change TLS policy. The security boundary is enforced by the resource model, not by access controls on a single resource.
+
+### Two listeners, two HTTPRoutes
+
+Your Gateway in this lab has two listeners:
 
 ```
-Browser (HTTP)  ──▶ [NLB] ──▶ Gateway (port 80) ──▶ HTTPRoute: 301 redirect
-Browser (HTTPS) ──▶ [NLB] ──▶ Gateway (port 443, TLS) ──▶ HTTPRoute ──▶ webapp pod
+Gateway (port 80, HTTP listener)
+  └── HTTPRoute: http-redirect
+        └── rule: redirect all traffic to https://...  (301)
+
+Gateway (port 443, HTTPS listener, holds TLS cert)
+  └── HTTPRoute: webapp-https
+        └── rule: forward to webapp pod
 ```
 
-### cert-manager: explicit Certificate resource
+This is why `sectionName` matters: when a Gateway has multiple listeners, an HTTPRoute uses `sectionName` in its `parentRefs` to attach to a specific one. Without it, the route attaches to all listeners — which would cause the redirect to loop.
 
-In Lab 2, you just added an annotation to the Ingress and cert-manager auto-detected it (called "ingress-shim"). In Gateway API you have two approaches:
+### cert-manager with Gateway API: explicit Certificate
 
-**Approach A (this lab):** Create a `Certificate` resource explicitly. cert-manager issues the cert and stores it in a Secret. The Gateway's listener references that Secret.
+In Lab 2, you added an annotation to the Ingress and cert-manager automatically detected it and managed the cert (called "ingress-shim"). That convenience doesn't exist with Gateway API.
+
+Here you create a `Certificate` resource explicitly:
 
 ```
-You create:  Certificate resource  ──▶  cert-manager issues cert  ──▶  Secret
-                                                                          ▲
-                                    Gateway listener references ──────────┘
+You create Certificate → cert-manager issues cert → stores in Secret
+                                                          ▲
+                                 Gateway listener references ──┘
 ```
 
-This is more explicit and easier to understand — you can see exactly when the cert is ready before creating the Gateway.
-
-**Approach B:** cert-manager Gateway API integration (cert-manager ≥ 1.15 + feature gate). cert-manager watches Gateway listeners and manages certs automatically. More automated but requires extra configuration.
-
-### `sectionName`: routing to specific listeners
-
-When your Gateway has multiple listeners, HTTPRoutes use `sectionName` to attach to a specific one:
-
-```yaml
-parentRefs:
-  - name: my-gateway
-    sectionName: http    # attach only to the "http" listener
-```
-
-Without `sectionName`, the route attaches to all listeners — which would send traffic through both HTTP and HTTPS listeners, and could break your redirect logic.
+The explicit approach is actually clearer for learning: you can see exactly when the cert is ready (when `READY=True` on the Certificate object) before the Gateway even starts.
 
 ### HTTP → HTTPS redirect: the declarative way
 
-In Lab 2 you used an annotation: `nginx.ingress.kubernetes.io/ssl-redirect: "true"`. In Gateway API, redirects are a first-class feature — a filter in the HTTPRoute:
+In Lab 2 you set `nginx.ingress.kubernetes.io/ssl-redirect: "true"` as an annotation. In Gateway API, redirects are a **first-class filter** in the HTTPRoute — no annotations, standardized across all implementations:
 
 ```yaml
-rules:
-  - filters:
-      - type: RequestRedirect
-        requestRedirect:
-          scheme: https
-          statusCode: 301
+filters:
+  - type: RequestRedirect
+    requestRedirect:
+      scheme: https
+      statusCode: 301
 ```
-
-This is implementation-agnostic — it works the same on NGINX, Envoy, or any other Gateway API controller.
 
 ---
 
@@ -119,155 +105,88 @@ This is implementation-agnostic — it works the same on NGINX, Envoy, or any ot
 export STUDENT_NAME=yourname
 ```
 
-### Step 2 — Create your namespace
+### Step 2 — Deploy the webapp
 
 ```bash
-kubectl create namespace $STUDENT_NAME
+kubectl apply -f apps.yaml
 ```
 
-### Step 3 — Deploy the webapp
-
-Save as `apps.yaml` (replace `YOUR_STUDENT_NAME`):
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: webapp-html
-  namespace: YOUR_STUDENT_NAME
-data:
-  index.html: |
-    <!DOCTYPE html>
-    <html>
-    <head><title>Secure Gateway App</title></head>
-    <body style="background:#bf360c;color:#fff;font-family:sans-serif;
-                 display:flex;align-items:center;justify-content:center;
-                 height:100vh;margin:0">
-      <div style="text-align:center">
-        <h1>🔐 Secure Gateway App</h1>
-        <p>Lab 4 — Gateway API HTTPS</p>
-        <p>TLS terminated at the Gateway!</p>
-      </div>
-    </body>
-    </html>
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: webapp
-  namespace: YOUR_STUDENT_NAME
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: webapp
-  template:
-    metadata:
-      labels:
-        app: webapp
-    spec:
-      containers:
-        - name: nginx
-          image: nginx:alpine
-          ports:
-            - containerPort: 80
-          volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html
-      volumes:
-        - name: html
-          configMap:
-            name: webapp-html
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: webapp
-  namespace: YOUR_STUDENT_NAME
-spec:
-  selector:
-    app: webapp
-  ports:
-    - port: 80
-      targetPort: 80
-```
+Creates the `lab4` namespace and a single webapp. No `envsubst` needed.
 
 ```bash
-envsubst < apps.yaml | kubectl apply -f -
+kubectl get pods -n lab4
 ```
 
 ---
 
-### Step 4 — Request a TLS certificate explicitly
+### Step 3 — Request a TLS certificate
 
-This creates a cert-manager `Certificate` resource that will:
-1. Talk to Let's Encrypt
-2. Solve the DNS-01 challenge via Route53
-3. Store the resulting cert in a Kubernetes Secret
-
-Save as `certificate.yaml` (replace `YOUR_STUDENT_NAME`):
-
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: YOUR_STUDENT_NAME-tls
-  namespace: YOUR_STUDENT_NAME
-spec:
-  # The Secret name where cert-manager will store the certificate + private key.
-  # The Gateway (next step) references this exact Secret name.
-  secretName: YOUR_STUDENT_NAME-tls-secret
-
-  issuerRef:
-    # Reference the cluster-wide issuer the instructor pre-created.
-    name: letsencrypt-prod
-    kind: ClusterIssuer
-
-  # The domain names this certificate is valid for.
-  dnsNames:
-    - YOUR_STUDENT_NAME.eks.ironlabs.online
-```
+Create the Certificate resource. cert-manager will immediately start the ACME flow.
 
 ```bash
 envsubst < certificate.yaml | kubectl apply -f -
 ```
 
-Watch cert-manager work:
+The Certificate YAML (in `certificate.yaml`):
 
-```bash
-# Poll until READY=True (30–120 seconds)
-watch -n5 "kubectl get certificate -n $STUDENT_NAME"
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webapp-tls
+  namespace: lab4
+spec:
+  # The name of the Secret cert-manager will create.
+  # The Gateway's TLS listener references this exact name — get it right.
+  secretName: webapp-tls-secret
 
-# Detailed view of what's happening
-kubectl describe certificate ${STUDENT_NAME}-tls -n $STUDENT_NAME
+  issuerRef:
+    name: letsencrypt-prod     # ClusterIssuer created during setup
+    kind: ClusterIssuer
 
-# You can also watch the underlying ACME objects
-kubectl get order,challenge -n $STUDENT_NAME
+  dnsNames:
+    - YOUR_STUDENT_NAME.eks.ironlabs.online
 ```
 
-**Do not proceed until `READY=True`.** The Gateway needs the Secret to exist before it can serve HTTPS.
+Watch until it's ready (DNS-01 challenge via Route53, takes 30–120 seconds):
+
+```bash
+watch -n5 "kubectl get certificate -n lab4"
+# Wait until READY=True before proceeding
+```
+
+You can also watch the full chain of ACME objects being created and resolved:
+
+```bash
+kubectl get certificate,certificaterequest,order,challenge -n lab4
+```
+
+**Don't proceed until `READY=True`.** The Gateway needs the Secret to exist before it can configure the HTTPS listener.
 
 ---
 
-### Step 5 — Create the Gateway with two listeners
+### Step 4 — Create the Gateway with two listeners
 
-Save as `gateway-tls.yaml` (replace `YOUR_STUDENT_NAME`):
+```bash
+envsubst < gateway-tls.yaml | kubectl apply -f -
+```
+
+The Gateway YAML (in `gateway-tls.yaml`):
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: YOUR_STUDENT_NAME-gateway
-  namespace: YOUR_STUDENT_NAME
+  name: my-gateway
+  namespace: lab4
   annotations:
-    # external-dns creates a DNS record for this hostname pointing to the Gateway NLB.
+    # external-dns will create a CNAME for this hostname pointing to the Gateway's NLB.
     external-dns.alpha.kubernetes.io/hostname: YOUR_STUDENT_NAME.eks.ironlabs.online
 spec:
   gatewayClassName: nginx
-
   listeners:
-    # ── Listener 1: HTTP (port 80) ──────────────────────────────────────────
-    # Accepts HTTP traffic. We'll attach an HTTPRoute that redirects to HTTPS.
+    # ── Listener 1: HTTP (port 80) ──────────────────────────────────────────────
+    # Accepts plain HTTP. We'll attach an HTTPRoute that redirects to HTTPS.
     - name: http
       port: 80
       protocol: HTTP
@@ -276,81 +195,83 @@ spec:
         namespaces:
           from: Same
 
-    # ── Listener 2: HTTPS (port 443) ────────────────────────────────────────
-    # Accepts HTTPS traffic and terminates TLS using the cert-manager Secret.
+    # ── Listener 2: HTTPS (port 443) ────────────────────────────────────────────
+    # Accepts HTTPS traffic. Terminates TLS using the cert-manager Secret.
     - name: https
       port: 443
       protocol: HTTPS
       hostname: "YOUR_STUDENT_NAME.eks.ironlabs.online"
       tls:
-        # Terminate = the Gateway decrypts TLS and forwards plain HTTP to backends.
-        # Passthrough = the Gateway forwards encrypted traffic to backends (they do TLS).
+        # Terminate: Gateway decrypts TLS, forwards plain HTTP to backends.
+        # Passthrough would forward encrypted traffic as-is to the backend pods.
         mode: Terminate
         certificateRefs:
-          # This Secret was created by cert-manager in Step 4.
-          # The Gateway reads the cert and key from here for TLS termination.
-          - name: YOUR_STUDENT_NAME-tls-secret
+          # This Secret was created by cert-manager in Step 3.
+          # If the Secret doesn't exist yet, the Gateway starts but the
+          # HTTPS listener won't work until cert-manager finishes.
+          - name: webapp-tls-secret
       allowedRoutes:
         namespaces:
           from: Same
 ```
 
-```bash
-envsubst < gateway-tls.yaml | kubectl apply -f -
+Wait for the Gateway to be programmed:
 
-# Wait for the Gateway to be programmed
-watch -n5 "kubectl get gateway -n $STUDENT_NAME"
-# PROGRAMMED=True means the controller configured the load balancer
+```bash
+watch -n5 "kubectl get gateway -n lab4"
+# PROGRAMMED=True means the NLB and NGINX are fully configured
 ```
 
 ---
 
-### Step 6 — Create the HTTPRoutes
+### Step 5 — Create the HTTPRoutes
 
-Two routes: one for HTTP→HTTPS redirect, one for the actual app traffic.
+Two routes: one for redirect, one for the actual app.
 
-Save as `httproutes.yaml` (replace `YOUR_STUDENT_NAME`):
+```bash
+envsubst < httproutes.yaml | kubectl apply -f -
+```
+
+The HTTPRoute YAML (in `httproutes.yaml`):
 
 ```yaml
-# ─── HTTPRoute 1: HTTP → HTTPS redirect ───────────────────────────────────────
+# ─── Route 1: HTTP → HTTPS redirect ───────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: http-redirect
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab4
 spec:
   parentRefs:
-    - name: YOUR_STUDENT_NAME-gateway
-      namespace: YOUR_STUDENT_NAME
+    - name: my-gateway
+      namespace: lab4
       # sectionName targets a specific listener by name.
-      # This route only attaches to the "http" listener (port 80).
-      # Without sectionName, it would attach to both listeners, which would
-      # cause the redirect to loop on the HTTPS listener.
+      # Attaching only to "http" (port 80) means this redirect rule
+      # doesn't affect the HTTPS listener — no redirect loop.
       sectionName: http
   hostnames:
     - "YOUR_STUDENT_NAME.eks.ironlabs.online"
   rules:
     - filters:
-        # RequestRedirect is a standard Gateway API filter — no annotations needed.
-        # 301 = Moved Permanently (browser caches this redirect)
+        # RequestRedirect is a standardized Gateway API filter.
+        # Compare to Lab 2's "nginx.ingress.kubernetes.io/ssl-redirect: true" annotation.
+        # Same behavior, but now it's part of the Kubernetes API spec.
         - type: RequestRedirect
           requestRedirect:
             scheme: https
             statusCode: 301
 ---
-# ─── HTTPRoute 2: HTTPS → webapp ──────────────────────────────────────────────
+# ─── Route 2: HTTPS → webapp ──────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: webapp-https
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab4
 spec:
   parentRefs:
-    - name: YOUR_STUDENT_NAME-gateway
-      namespace: YOUR_STUDENT_NAME
-      # This route only attaches to the "https" listener (port 443).
-      # The Gateway handles TLS; this route just does plain HTTP routing.
-      sectionName: https
+    - name: my-gateway
+      namespace: lab4
+      sectionName: https    # attach only to the HTTPS listener
   hostnames:
     - "YOUR_STUDENT_NAME.eks.ironlabs.online"
   rules:
@@ -360,30 +281,32 @@ spec:
 ```
 
 ```bash
-envsubst < httproutes.yaml | kubectl apply -f -
-kubectl get httproute -n $STUDENT_NAME
+kubectl get httproute -n lab4
 ```
 
 ---
 
-### Step 7 — Wait for DNS
+### Step 6 — Wait for DNS
 
 ```bash
 watch -n5 "nslookup ${STUDENT_NAME}.eks.ironlabs.online"
 ```
 
-### Step 8 — Test HTTPS
+---
+
+### Step 7 — Test HTTPS
 
 ```bash
 curl https://${STUDENT_NAME}.eks.ironlabs.online
 ```
 
-Open in a browser — padlock icon should show a valid Let's Encrypt cert.
+Open in a browser — the padlock icon should show a valid Let's Encrypt certificate.
 
-### Step 9 — Verify HTTP → HTTPS redirect
+---
+
+### Step 8 — Verify HTTP → HTTPS redirect
 
 ```bash
-# -I = show headers, don't download body
 curl -I http://${STUDENT_NAME}.eks.ironlabs.online
 
 # Expected:
@@ -393,26 +316,25 @@ curl -I http://${STUDENT_NAME}.eks.ironlabs.online
 
 ---
 
-## Inspect the TLS handshake
+## Inspect the TLS certificate
 
 ```bash
-# Full TLS certificate details
-echo | openssl s_client -connect ${STUDENT_NAME}.eks.ironlabs.online:443 2>/dev/null \
+echo | openssl s_client \
+  -connect ${STUDENT_NAME}.eks.ironlabs.online:443 2>/dev/null \
   | openssl x509 -noout -issuer -subject -dates
 ```
 
 ---
 
-## Compare: Ingress HTTPS (Lab 2) vs Gateway API HTTPS (Lab 4)
+## Compare: Lab 2 (Ingress HTTPS) vs Lab 4 (Gateway API HTTPS)
 
-| Concept | Ingress HTTPS (Lab 2) | Gateway API HTTPS (Lab 4) |
+| Concept | Ingress + cert-manager | Gateway API + cert-manager |
 |---------|----------------------|--------------------------|
-| Where TLS config lives | Inside the Ingress resource | On the Gateway listener |
-| Who triggers cert issuance | Ingress annotation (`cert-manager.io/cluster-issuer`) | Explicit `Certificate` resource |
-| HTTP→HTTPS redirect | `nginx.ingress.kubernetes.io/ssl-redirect` annotation | `RequestRedirect` filter in HTTPRoute |
-| Listener targeting | N/A (one resource) | `sectionName` in HTTPRoute `parentRefs` |
-| Who controls TLS | Anyone who can create an Ingress | Gateway admin (separate from route authors) |
-| Portability | NGINX-specific annotation | Standard Gateway API filter |
+| Where TLS config lives | Inside the Ingress `tls:` block | On the Gateway listener |
+| cert-manager trigger | `cert-manager.io/cluster-issuer` annotation on Ingress | Explicit `Certificate` resource |
+| HTTP→HTTPS redirect | `ssl-redirect: "true"` annotation (NGINX-specific) | `RequestRedirect` filter (standardized) |
+| Listener targeting | Not applicable — one resource | `sectionName` in HTTPRoute `parentRefs` |
+| Who controls TLS | Anyone who can edit the Ingress | Gateway admin (separate from route authors) |
 
 ---
 
@@ -422,16 +344,19 @@ echo | openssl s_client -connect ${STUDENT_NAME}.eks.ironlabs.online:443 2>/dev/
 envsubst < httproutes.yaml | kubectl delete -f -
 envsubst < gateway-tls.yaml | kubectl delete -f -
 envsubst < certificate.yaml | kubectl delete -f -
-envsubst < apps.yaml | kubectl delete -f -
-kubectl delete namespace $STUDENT_NAME
+kubectl delete -f apps.yaml
 ```
 
 ---
 
 ## Key takeaways
 
-- **TLS lives on the Gateway listener**, not the HTTPRoute — enabling role-based TLS policy
-- **Explicit `Certificate` resource** gives you full visibility into cert issuance status before the Gateway starts
-- **`sectionName`** in `parentRefs` is how you target a specific listener — critical for the redirect/HTTPS split
-- **`RequestRedirect` filter** is declarative and controller-agnostic — no annotations, works everywhere
-- **`tls.mode: Terminate`** vs `Passthrough`: Terminate = Gateway decrypts, Passthrough = backend decrypts (mTLS, etc.)
+- **TLS config belongs on the Gateway listener**, not the route — platform team controls TLS, developers attach routes
+- **Create the Certificate first** — the Gateway needs the Secret to exist before the HTTPS listener works
+- **`sectionName`** in `parentRefs` is how you target a specific listener — critical when the Gateway has both HTTP and HTTPS
+- **`RequestRedirect` filter** is the declarative, portable replacement for NGINX's ssl-redirect annotation
+- **`tls.mode: Terminate`** = Gateway decrypts; **`Passthrough`** = backend decrypts (used for end-to-end mTLS)
+
+---
+
+You've now completed all four labs. You've operated both sides of the ingress-to-Gateway-API migration that the industry is working through right now. See [`00-intro-2026.md`](../00-intro-2026.md) for context on where the ecosystem goes from here.

@@ -1,70 +1,85 @@
 # Lab 3 — Gateway API: Path & Subdomain Routing
 
-## What is this lab about?
+## Before this lab
 
-You'll do the same routing as Lab 1 (path and subdomain) but using **Gateway API** instead of Ingress. Gateway API is the next-generation Kubernetes standard for HTTP routing, and it's already stable (v1) in Kubernetes 1.28+.
+```bash
+# Verify Gateway API CRDs are installed
+kubectl get crd gateways.gateway.networking.k8s.io
 
-Your apps will be reachable at:
-- `http://YOURNAME.eks.ironlabs.online/blue` → Blue app
-- `http://YOURNAME.eks.ironlabs.online/green` → Green app
-- `http://blue.YOURNAME.eks.ironlabs.online` → Blue app
-- `http://green.YOURNAME.eks.ironlabs.online` → Green app
+# Verify NGINX Gateway Fabric is running
+kubectl get pods -n nginx-gateway
+kubectl get gatewayclass
+
+# Set your name if you haven't already
+export STUDENT_NAME=yourname
+```
 
 ---
 
-## Concepts you need to know
+## What is this lab about?
+
+You'll achieve the same routing as Lab 1 — path-based and subdomain-based — but using **Gateway API** instead of Ingress. The end result is the same URLs:
+
+```
+http://YOURNAME.eks.ironlabs.online/blue   → Blue app
+http://YOURNAME.eks.ironlabs.online/green  → Green app
+http://blue.YOURNAME.eks.ironlabs.online   → Blue app
+http://green.YOURNAME.eks.ironlabs.online  → Green app
+```
+
+The difference is in how you define the routing and who owns each piece.
+
+---
+
+## Concepts
 
 ### Why Gateway API? What's wrong with Ingress?
 
-Ingress has been around since Kubernetes 1.1 and works well for simple cases. But it has real limitations:
+You just used Ingress in Labs 1 and 2. Here's what you might have noticed:
 
-1. **Non-standard features need annotations** — NGINX's `nginx.ingress.kubernetes.io/rewrite-target` is completely different from Traefik's or AWS ALB's annotations. Your YAML is not portable between controllers.
+**Non-standard features need non-standard annotations.** In Lab 1 you used `nginx.ingress.kubernetes.io/rewrite-target: /` to strip the path prefix. That annotation is specific to NGINX. If you switch to Traefik, AWS ALB, or any other Ingress controller, that annotation doesn't exist — you rewrite all your YAML.
 
-2. **No role separation** — a developer creating routing rules and a cluster admin controlling which load balancers exist both use the same `Ingress` resource. There's no way to give developers routing control without also giving them the ability to change cluster-level settings.
+**There's no role separation.** In a real company, the team that manages infrastructure (which load balancers exist, which TLS policies apply) and the team that deploys applications (which paths route to which services) are often different people. With Ingress, they both touch the same resource type. There's no clean boundary.
 
-3. **Expressiveness limits** — traffic splitting (50%/50% canary deployments), header-based routing, gRPC routing all require annotations or are impossible.
+**The API stops at HTTP/HTTPS.** gRPC, TCP, UDP, traffic splitting for canary deployments — none of these are in the Ingress spec. They require proprietary annotations or separate CRDs.
 
-**Gateway API** was designed by SIG Network to fix all of this. It's been stable since Kubernetes 1.28 and is actively replacing Ingress.
+**Gateway API** was designed by Kubernetes SIG Network to fix all of this. It's been stable (v1) since Kubernetes 1.28 and is now implemented by NGINX, Envoy, Cilium, Istio, AWS, GKE, and every other major Kubernetes networking vendor.
 
 ### The role-oriented model
 
-Gateway API splits routing into three separate Kubernetes resources, each owned by a different team:
+Gateway API splits routing into three resources, each with a clear owner:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ GatewayClass  (created by: Platform/Infrastructure team) │
-│ "Use NGINX Gateway Fabric as the controller"             │
-└─────────────────────────┬───────────────────────────────┘
-                          │ references
-┌─────────────────────────▼───────────────────────────────┐
-│ Gateway  (created by: Cluster Admin)                     │
-│ "Listen on port 80, accept routes for *.ironlabs.online" │
-└────────────┬──────────────────────────┬─────────────────┘
-             │ parentRef                 │ parentRef
-┌────────────▼────────┐    ┌────────────▼────────────────┐
-│ HTTPRoute           │    │ HTTPRoute                   │
-│ (Developer: Alice)  │    │ (Developer: Bob)            │
-│ /blue → app-blue    │    │ /green → app-green          │
-└─────────────────────┘    └─────────────────────────────┘
+GatewayClass  ─── Platform/Infrastructure team
+                  "Which controller handles traffic? NGINX Gateway Fabric."
+                  Created once per cluster. You don't touch this.
+      │
+      ▼
+  Gateway  ─── Cluster Admin (or you, since it's your cluster)
+               "I want an entry point on port 80 accepting traffic
+                for my hostnames."
+                One Gateway per lab, you create this.
+      │
+      ▼
+  HTTPRoute  ─── Application Developer
+                 "Route /blue to app-blue, /green to app-green."
+                 One or more per app, you create these.
 ```
 
-This means:
-- Platform team controls *what infrastructure exists* (GatewayClass)
-- Cluster admin controls *what entry points exist* (Gateway)
-- Developers control *their own routes* (HTTPRoute) — without touching shared infra
+In a company with a shared cluster, this separation means developers can manage their own HTTPRoutes without getting access to infrastructure-level resources. On your own cluster it's all you, but understanding the model matters for how production systems are structured.
 
-### The four key resources
+### HTTPRoute vs Ingress: same goal, different API
 
-| Resource | Who creates it | What it defines |
-|----------|---------------|-----------------|
-| **GatewayClass** | Instructor (once) | Which implementation to use (`nginx` = NGINX Gateway Fabric) |
-| **Gateway** | You (per lab) | Entry point: port 80, which namespaces can attach routes |
-| **HTTPRoute** | You (per app) | Routing rules: hostnames + paths → backend Services |
-| **ReferenceGrant** | Namespace owner | Cross-namespace access (needed for TLS Secrets in Lab 4) |
+| Concept | Ingress | HTTPRoute |
+|---------|---------|-----------|
+| Path prefix strip | `nginx.ingress.kubernetes.io/rewrite-target: /` | `URLRewrite` filter — standardized |
+| Host matching | `spec.rules[].host` | `spec.hostnames[]` |
+| Portability | NGINX-specific annotations | Same syntax on every implementation |
+| Traffic splitting | Not supported | `backendRefs` with `weight` field |
 
 ### How external-dns works with Gateway API
 
-In Lab 1, external-dns read the hostnames from the Ingress `spec.rules[].host` field. In this lab, external-dns reads hostnames from the `external-dns.alpha.kubernetes.io/hostname` annotation on the Gateway. When the Gateway gets an address (NLB hostname), external-dns creates a CNAME pointing to it.
+In Lab 1, external-dns read hostnames from the Ingress `spec.rules[].host` field. With Gateway API, there's no equivalent — HTTPRoutes don't trigger DNS by themselves. Instead, you add an annotation to the **Gateway** listing the hostnames you want DNS records for. external-dns reads the annotation and creates the records when the Gateway gets an address.
 
 ---
 
@@ -76,230 +91,105 @@ In Lab 1, external-dns read the hostnames from the Ingress `spec.rules[].host` f
 export STUDENT_NAME=yourname
 ```
 
-### Step 2 — Create your namespace
+### Step 2 — Deploy the two apps
 
 ```bash
-kubectl create namespace $STUDENT_NAME
+kubectl apply -f apps.yaml
 ```
 
-### Step 3 — Deploy the two apps
-
-Same apps as Lab 1. Save as `apps.yaml` (replace `YOUR_STUDENT_NAME`):
-
-```yaml
-# ─── Blue app ─────────────────────────────────────────────────────────────────
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-blue-html
-  namespace: YOUR_STUDENT_NAME
-data:
-  index.html: |
-    <!DOCTYPE html>
-    <html>
-    <head><title>App Blue</title></head>
-    <body style="background:#1a73e8;color:#fff;font-family:sans-serif;
-                 display:flex;align-items:center;justify-content:center;
-                 height:100vh;margin:0">
-      <div style="text-align:center">
-        <h1>🔵 App Blue</h1>
-        <p>Lab 3 — Gateway API Routing</p>
-      </div>
-    </body>
-    </html>
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-blue
-  namespace: YOUR_STUDENT_NAME
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: app-blue
-  template:
-    metadata:
-      labels:
-        app: app-blue
-    spec:
-      containers:
-        - name: nginx
-          image: nginx:alpine
-          ports:
-            - containerPort: 80
-          volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html
-      volumes:
-        - name: html
-          configMap:
-            name: app-blue-html
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-blue
-  namespace: YOUR_STUDENT_NAME
-spec:
-  selector:
-    app: app-blue
-  ports:
-    - port: 80
-      targetPort: 80
----
-# ─── Green app ────────────────────────────────────────────────────────────────
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-green-html
-  namespace: YOUR_STUDENT_NAME
-data:
-  index.html: |
-    <!DOCTYPE html>
-    <html>
-    <head><title>App Green</title></head>
-    <body style="background:#0f9d58;color:#fff;font-family:sans-serif;
-                 display:flex;align-items:center;justify-content:center;
-                 height:100vh;margin:0">
-      <div style="text-align:center">
-        <h1>🟢 App Green</h1>
-        <p>Lab 3 — Gateway API Routing</p>
-      </div>
-    </body>
-    </html>
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-green
-  namespace: YOUR_STUDENT_NAME
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: app-green
-  template:
-    metadata:
-      labels:
-        app: app-green
-    spec:
-      containers:
-        - name: nginx
-          image: nginx:alpine
-          ports:
-            - containerPort: 80
-          volumeMounts:
-            - name: html
-              mountPath: /usr/share/nginx/html
-      volumes:
-        - name: html
-          configMap:
-            name: app-green-html
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-green
-  namespace: YOUR_STUDENT_NAME
-spec:
-  selector:
-    app: app-green
-  ports:
-    - port: 80
-      targetPort: 80
-```
+Creates the `lab3` namespace plus the same blue/green apps as Lab 1. No `envsubst` needed.
 
 ```bash
-envsubst < apps.yaml | kubectl apply -f -
-kubectl get pods -n $STUDENT_NAME
+kubectl get pods -n lab3
 ```
 
 ---
 
-### Step 4 — Create the Gateway
+### Step 3 — Create the Gateway
 
-The Gateway is your entry point. Think of it like claiming a slice of the shared load balancer — you declare which hostnames you want to receive traffic for.
+The Gateway is your entry point. It tells NGINX Gateway Fabric: "create a listener on port 80, accept routes from this namespace."
 
-Save as `gateway.yaml` (replace `YOUR_STUDENT_NAME`):
+```bash
+envsubst < gateway.yaml | kubectl apply -f -
+```
+
+The Gateway YAML (in `gateway.yaml`):
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: YOUR_STUDENT_NAME-gateway
-  namespace: YOUR_STUDENT_NAME
+  name: my-gateway
+  namespace: lab3
   annotations:
-    # external-dns reads this annotation to know which DNS records to create.
-    # It will create a CNAME for each hostname pointing to the Gateway's NLB address.
+    # Tell external-dns which DNS records to create for this Gateway.
+    # external-dns creates a CNAME for each hostname pointing at the Gateway's NLB address.
+    # This is how Gateway API integrates with DNS — the Gateway, not the HTTPRoute, carries this.
     external-dns.alpha.kubernetes.io/hostname: >-
       YOUR_STUDENT_NAME.eks.ironlabs.online,
       blue.YOUR_STUDENT_NAME.eks.ironlabs.online,
       green.YOUR_STUDENT_NAME.eks.ironlabs.online
 spec:
-  # "nginx" is the GatewayClass created by the instructor using NGINX Gateway Fabric.
-  # This tells Kubernetes which controller manages this Gateway.
+  # References the GatewayClass installed during setup.
+  # This tells Kubernetes which controller (NGINX Gateway Fabric) handles this Gateway.
   gatewayClassName: nginx
 
   listeners:
     - name: http
       port: 80
       protocol: HTTP
-      # allowedRoutes controls which HTTPRoute resources can attach to this listener.
-      # "Same" = only HTTPRoutes in the same namespace (YOUR_STUDENT_NAME).
-      # You could also use "All" or label selectors for cross-namespace routes.
+      # Only HTTPRoutes in the same namespace (lab3) can attach to this listener.
+      # In a multi-team cluster you'd use label selectors or "All" here.
       allowedRoutes:
         namespaces:
           from: Same
 ```
 
-```bash
-envsubst < gateway.yaml | kubectl apply -f -
-```
-
-Watch the Gateway get an address (the controller provisions infrastructure):
+Watch the Gateway get an address (NGINX Gateway Fabric provisions a new NLB):
 
 ```bash
-watch -n5 "kubectl get gateway -n $STUDENT_NAME"
+watch -n5 "kubectl get gateway -n lab3"
 # Wait until PROGRAMMED=True and ADDRESS is populated
 ```
 
+`PROGRAMMED=True` means NGINX Gateway Fabric has configured the proxy and the NLB is ready.
+
 ---
 
-### Step 5 — Create the HTTPRoutes
+### Step 4 — Create the HTTPRoutes
 
-HTTPRoutes define the actual routing rules. They attach to the Gateway via `parentRefs`. Notice these are standard Kubernetes resources — no controller-specific annotations needed.
+HTTPRoutes define the actual routing rules and attach to the Gateway via `parentRefs`.
 
-Save as `httproutes.yaml` (replace `YOUR_STUDENT_NAME`):
+```bash
+envsubst < httproutes.yaml | kubectl apply -f -
+```
+
+The HTTPRoute YAML (in `httproutes.yaml`):
 
 ```yaml
-# ─── HTTPRoute 1: PATH-BASED routing ──────────────────────────────────────────
+# ─── Path-based routing ───────────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: path-routing
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab3
 spec:
-  # Attach this route to the Gateway defined above.
-  # The route only becomes active when the Gateway accepts it.
   parentRefs:
-    - name: YOUR_STUDENT_NAME-gateway
-      namespace: YOUR_STUDENT_NAME
-
-  # This route only handles traffic for this specific hostname.
+    # Attach this route to the Gateway above.
+    # The Gateway accepts or rejects routes based on its allowedRoutes config.
+    - name: my-gateway
+      namespace: lab3
   hostnames:
     - "YOUR_STUDENT_NAME.eks.ironlabs.online"
-
   rules:
-    # Rule 1: /blue → app-blue
     - matches:
         - path:
             type: PathPrefix
             value: /blue
       filters:
         # URLRewrite strips /blue from the path before forwarding.
-        # Without this, the app receives /blue but only serves /.
-        # This is equivalent to nginx's rewrite-target annotation — but standardized.
+        # Compare to Lab 1's "nginx.ingress.kubernetes.io/rewrite-target: /"
+        # Same result, but now it's a standardized Gateway API feature, not an annotation.
         - type: URLRewrite
           urlRewrite:
             path:
@@ -308,8 +198,6 @@ spec:
       backendRefs:
         - name: app-blue
           port: 80
-
-    # Rule 2: /green → app-green
     - matches:
         - path:
             type: PathPrefix
@@ -324,18 +212,19 @@ spec:
         - name: app-green
           port: 80
 ---
-# ─── HTTPRoute 2: HOST-BASED routing for blue subdomain ───────────────────────
+# ─── Subdomain routing (blue) ─────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: subdomain-blue
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab3
 spec:
   parentRefs:
-    - name: YOUR_STUDENT_NAME-gateway
-      namespace: YOUR_STUDENT_NAME
-  # Traffic matching this hostname is handled by this route.
-  # The Gateway must have a listener that accepts this hostname.
+    - name: my-gateway
+      namespace: lab3
+  # The hostname here must match what the Gateway's listener accepts.
+  # The Gateway listener has no hostname filter, so it accepts anything
+  # that's in the external-dns annotation.
   hostnames:
     - "blue.YOUR_STUDENT_NAME.eks.ironlabs.online"
   rules:
@@ -343,16 +232,16 @@ spec:
         - name: app-blue
           port: 80
 ---
-# ─── HTTPRoute 3: HOST-BASED routing for green subdomain ──────────────────────
+# ─── Subdomain routing (green) ────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: subdomain-green
-  namespace: YOUR_STUDENT_NAME
+  namespace: lab3
 spec:
   parentRefs:
-    - name: YOUR_STUDENT_NAME-gateway
-      namespace: YOUR_STUDENT_NAME
+    - name: my-gateway
+      namespace: lab3
   hostnames:
     - "green.YOUR_STUDENT_NAME.eks.ironlabs.online"
   rules:
@@ -361,36 +250,35 @@ spec:
           port: 80
 ```
 
-```bash
-envsubst < httproutes.yaml | kubectl apply -f -
-```
-
 Check the routes are accepted:
 
 ```bash
-kubectl get httproute -n $STUDENT_NAME
+kubectl get httproute -n lab3
 
-# For more detail, check the status conditions
-kubectl describe httproute path-routing -n $STUDENT_NAME
-# Look for: "Accepted: True" and "ResolvedRefs: True"
+# For detail — look for Accepted: True and ResolvedRefs: True
+kubectl describe httproute path-routing -n lab3
 ```
 
 ---
 
-### Step 6 — Wait for DNS (~60 seconds)
+### Step 5 — Wait for DNS (~60 seconds)
 
 ```bash
 watch -n5 "nslookup ${STUDENT_NAME}.eks.ironlabs.online"
 ```
 
-### Step 7 — Test path routing
+---
+
+### Step 6 — Test path routing
 
 ```bash
 curl http://${STUDENT_NAME}.eks.ironlabs.online/blue
 curl http://${STUDENT_NAME}.eks.ironlabs.online/green
 ```
 
-### Step 8 — Test subdomain routing
+---
+
+### Step 7 — Test subdomain routing
 
 ```bash
 curl http://blue.${STUDENT_NAME}.eks.ironlabs.online
@@ -399,25 +287,11 @@ curl http://green.${STUDENT_NAME}.eks.ironlabs.online
 
 ---
 
-## Compare: Ingress (Lab 1) vs Gateway API (Lab 3)
-
-| Feature | Ingress | Gateway API |
-|---------|---------|-------------|
-| Path rewrite | `nginx.ingress.kubernetes.io/rewrite-target: /` (non-standard) | `URLRewrite` filter (standard, works on any GW implementation) |
-| Host routing | Ingress `spec.rules[].host` | HTTPRoute `hostnames` field |
-| Role separation | None — one resource for everything | GatewayClass / Gateway / HTTPRoute |
-| Traffic splitting | Not supported natively | Supported: `backendRefs` with `weight` |
-| gRPC | Not supported | Supported via `GRPCRoute` |
-| TCP/UDP | Not supported | Supported via `TCPRoute`/`UDPRoute` |
-| Portability | Annotations are controller-specific | All features standardized in the API spec |
-
----
-
 ## Inspect route status
 
 ```bash
-# See which parent the route is attached to and whether it's healthy
-kubectl get httproute path-routing -n $STUDENT_NAME -o yaml | grep -A 20 "status:"
+# The status shows which Gateway the route is attached to and whether it's healthy
+kubectl get httproute path-routing -n lab3 -o yaml | grep -A 30 "status:"
 ```
 
 ---
@@ -427,16 +301,19 @@ kubectl get httproute path-routing -n $STUDENT_NAME -o yaml | grep -A 20 "status
 ```bash
 envsubst < httproutes.yaml | kubectl delete -f -
 envsubst < gateway.yaml | kubectl delete -f -
-envsubst < apps.yaml | kubectl delete -f -
-kubectl delete namespace $STUDENT_NAME
+kubectl delete -f apps.yaml
 ```
+
+external-dns will remove the DNS records when the Gateway annotation disappears.
 
 ---
 
 ## Key takeaways
 
-- **Gateway API is the future** — Ingress is in maintenance mode; new features go to Gateway API
-- **GatewayClass / Gateway / HTTPRoute** maps to Platform / Admin / Developer responsibilities
-- **Routing rules in HTTPRoute are standardized** — no more controller-specific annotations
-- **`parentRefs`** is how routes attach to Gateways — the Gateway must accept the route's namespace
-- **`URLRewrite` filter** replaces path rewrites that used to require NGINX annotations
+- **GatewayClass → Gateway → HTTPRoute** maps to platform team → cluster admin → developer
+- **HTTPRoute `parentRefs`** is the attachment mechanism — the Gateway must accept the route's namespace
+- **`URLRewrite` filter** does what `rewrite-target` did in Lab 1, but as a standardized Gateway API feature
+- **External-dns annotation on the Gateway** (not the HTTPRoute) triggers DNS record creation
+- The routing result is identical to Lab 1 — the difference is in portability and role separation
+
+When you're done, continue to [Lab 4 →](../lab4-gateway-https/README.md)
