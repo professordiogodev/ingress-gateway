@@ -30,7 +30,9 @@ Every script reads these. Set them in your shell before running anything.
 export STUDENT_NAME=yourname
 
 # Your EKS cluster name and region
-export CLUSTER_NAME=$(aws eks list-clusters --query 'clusters[0]' --output text)
+export CLUSTER_NAME=$(aws eks list-clusters \
+  --query "clusters[?contains(@, '${STUDENT_NAME}')] | [0]" \
+  --output text)
 export AWS_REGION=us-east-1   # change if your cluster is in a different region
 
 # Auto-discovered — don't change these
@@ -47,8 +49,6 @@ echo "Your domain: ${STUDENT_NAME}.eks.ironlabs.online"
 ```
 
 Verify the output looks correct before continuing.
-
-> **If you have multiple clusters**, `aws eks list-clusters --query 'clusters[0]'` picks the first one. Set `CLUSTER_NAME` manually if that's wrong.
 
 ---
 
