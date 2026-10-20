@@ -20,6 +20,6 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
 
 echo ""
 echo "==> NGINX Ingress Controller installed."
-echo "    NLB hostname (CNAME target for your DNS records):"
+echo "    NLB hostname (target for your DNS records):"
 kubectl get svc -n ingress-nginx ingress-nginx-controller \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'; echo

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run once before any lab.
 # Creates the OIDC provider and IAM roles that allow cert-manager and
-# external-dns to call AWS APIs (Route53) without long-lived credentials.
+# external-dns to call AWS APIs (Route53) without long-lived credentials,
+# and opens node-to-node traffic so the ingress controllers can reach app pods.
 set -euo pipefail
 
 # ── Require variables set in setup/README.md Step 0 ──────────────────────────
@@ -154,6 +155,29 @@ aws iam attach-role-policy \
   --role-name "CertManagerRole-${CLUSTER_NAME}" \
   --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/CertManagerPolicy-${CLUSTER_NAME}" \
   --no-cli-pager
+
+# ── 6. Allow all node-to-node traffic ─────────────────────────────────────────
+# The default node security group only allows node-to-node TCP on ports
+# 1025-65535. The lab apps listen on port 80, so the ingress controller can't
+# reach app pods running on a different node (requests hang, then 504).
+# A self-referencing all-traffic rule is the standard EKS fix.
+echo "==> Allowing all traffic between worker nodes..."
+NODE_SGS=$(aws ec2 describe-instances \
+  --region "$AWS_REGION" \
+  --filters "Name=tag:eks:cluster-name,Values=${CLUSTER_NAME}" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[].Instances[].SecurityGroups[].GroupId' \
+  --output text | tr '\t' '\n' | sort -u)
+
+for SG in $NODE_SGS; do
+  aws ec2 authorize-security-group-ingress \
+    --region "$AWS_REGION" \
+    --group-id "$SG" \
+    --protocol -1 \
+    --source-group "$SG" \
+    --no-cli-pager >/dev/null 2>&1 \
+    && echo "  $SG: rule added" \
+    || echo "  $SG: rule already exists, continuing"
+done
 
 echo ""
 echo "==> Done. IAM roles created:"

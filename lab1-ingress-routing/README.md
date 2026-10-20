@@ -230,7 +230,7 @@ kubectl get ingress -n lab1
 
 ### Step 4 — Wait for DNS propagation
 
-external-dns detects the new Ingress and creates CNAME records in Route53. This takes about 60–90 seconds.
+external-dns detects the new Ingress and creates DNS records in Route53 (alias `A`/`AAAA` records pointing at your NLB, plus `TXT` records that mark them as owned by your cluster). This takes about 60–90 seconds.
 
 ```bash
 # Poll until your record resolves
@@ -265,8 +265,8 @@ curl http://green.${STUDENT_NAME}.eks.ironlabs.online
 
 1. You applied two `Ingress` resources with `ingressClassName: nginx`
 2. The NGINX Ingress Controller detected them and updated its internal `nginx.conf` with new `server {}` blocks for your hostnames
-3. external-dns detected the hostnames in `spec.rules[].host` and called Route53 to create CNAME records pointing at your NLB
-4. Traffic: `browser → Route53 CNAME → NLB → NGINX pod → app-blue or app-green pod`
+3. external-dns detected the hostnames in `spec.rules[].host` and called Route53 to create alias records pointing at your NLB
+4. Traffic: `browser → Route53 alias record → NLB → NGINX pod → app-blue or app-green pod`
 
 ### Bonus: See the generated NGINX config
 

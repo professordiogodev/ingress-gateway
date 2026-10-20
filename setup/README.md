@@ -108,6 +108,8 @@ bash 00-oidc-iam.sh
 
 These roles are scoped tightly: they can only be assumed by the specific service accounts in your cluster, and they can only modify Route53 records in `ironlabs.online`.
 
+*Node-to-node traffic* — The default EKS node security group only allows traffic between nodes on ports 1025–65535. The lab apps listen on port 80, so without a fix the ingress controller can't reach app pods on a different node and requests time out with a `504`. The script adds a rule allowing all traffic between nodes in the same security group.
+
 ---
 
 ## Step 2 — NGINX Ingress Controller
@@ -122,7 +124,7 @@ Installs the NGINX Ingress Controller via Helm into the `ingress-nginx` namespac
 
 The NLB is shared across all your Ingress resources. You don't pay per Ingress — you pay per NLB. That's the cost efficiency of the ingress pattern.
 
-At the end of this script, you'll see the NLB hostname. external-dns will later create CNAMEs pointing to this hostname.
+At the end of this script, you'll see the NLB hostname. external-dns will later create Route53 alias records pointing to this hostname.
 
 ---
 
