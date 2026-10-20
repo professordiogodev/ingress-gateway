@@ -180,7 +180,7 @@ metadata:
   name: my-gateway
   namespace: lab4
   annotations:
-    # external-dns will create a CNAME for this hostname pointing to the Gateway's NLB.
+    # external-dns will create an alias record for this hostname pointing to the Gateway's NLB.
     external-dns.alpha.kubernetes.io/hostname: YOUR_STUDENT_NAME.eks.ironlabs.online
 spec:
   gatewayClassName: nginx
@@ -322,7 +322,8 @@ curl -I http://${STUDENT_NAME}.eks.ironlabs.online
 
 ```bash
 echo | openssl s_client \
-  -connect ${STUDENT_NAME}.eks.ironlabs.online:443 2>/dev/null \
+  -connect ${STUDENT_NAME}.eks.ironlabs.online:443 \
+  -servername ${STUDENT_NAME}.eks.ironlabs.online 2>/dev/null \
   | openssl x509 -noout -issuer -subject -dates
 ```
 

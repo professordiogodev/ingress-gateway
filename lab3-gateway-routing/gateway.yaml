@@ -6,7 +6,7 @@ metadata:
   namespace: lab3
   annotations:
     # external-dns reads this annotation to know which DNS records to create.
-    # It creates CNAMEs pointing at this Gateway's NLB for each listed hostname.
+    # It creates alias records pointing at this Gateway's NLB for each listed hostname.
     external-dns.alpha.kubernetes.io/hostname: >-
       ${STUDENT_NAME}.eks.ironlabs.online,
       blue.${STUDENT_NAME}.eks.ironlabs.online,

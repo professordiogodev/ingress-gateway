@@ -123,7 +123,7 @@ metadata:
   namespace: lab3
   annotations:
     # Tell external-dns which DNS records to create for this Gateway.
-    # external-dns creates a CNAME for each hostname pointing at the Gateway's NLB address.
+    # external-dns creates an alias record for each hostname pointing at the Gateway's NLB address.
     # This is how Gateway API integrates with DNS — the Gateway, not the HTTPRoute, carries this.
     external-dns.alpha.kubernetes.io/hostname: >-
       YOUR_STUDENT_NAME.eks.ironlabs.online,
