@@ -20,9 +20,49 @@ These labs exercise four Kubernetes components that don't come with EKS out of t
 
 ---
 
+## Before you start — install the tools
+
+You need five command-line tools. `kubectl` and the `aws` CLI should already be configured against your cluster and AWS account (the instructor covers that with cluster creation). The block below installs `helm` and `eksctl` **only if they're missing** — it's safe to run even if you already have them. Works on macOS and Linux.
+
+```bash
+# helm — installs the controllers (Helm charts)
+if ! command -v helm >/dev/null 2>&1; then
+  echo "Installing helm..."
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+else
+  echo "helm already installed: $(helm version --short)"
+fi
+
+# eksctl — registers the cluster's OIDC provider with IAM
+if ! command -v eksctl >/dev/null 2>&1; then
+  echo "Installing eksctl..."
+  PLATFORM="$(uname -s)_$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+  curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_${PLATFORM}.tar.gz" | tar -xz -C /tmp
+  sudo install -m 0755 /tmp/eksctl /usr/local/bin/eksctl && rm /tmp/eksctl
+else
+  echo "eksctl already installed: $(eksctl version)"
+fi
+```
+
+`envsubst` (used by the labs to fill in `$STUDENT_NAME`) ships with `gettext`. It's usually already present on Linux; on macOS run `brew install gettext` if the check below says it's missing.
+
+Now check that all five tools work:
+
+```bash
+kubectl version --client && aws sts get-caller-identity && helm version --short && eksctl version && envsubst --version
+```
+
+If any command fails, fix it before going further.
+
+---
+
 ## Step 0 — Set your variables
 
-Every script reads these. Set them in your shell before running anything.
+Every script reads these. Set them in your shell before running anything. Run everything in this guide **from inside the `setup/` folder**:
+
+```bash
+cd setup
+```
 
 ```bash
 # Your chosen name — becomes your DNS subdomain: YOURNAME.eks.ironlabs.online
