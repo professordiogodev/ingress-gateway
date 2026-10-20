@@ -264,8 +264,10 @@ kubectl describe httproute path-routing -n lab3
 ### Step 5 — Wait for DNS (~60 seconds)
 
 ```bash
-watch -n5 "nslookup ${STUDENT_NAME}.eks.ironlabs.online"
+watch -n5 "nslookup ${STUDENT_NAME}.eks.ironlabs.online 8.8.8.8"
 ```
+
+> **Querying `8.8.8.8` directly** skips your laptop's DNS cache. If your browser or `curl` still says the host can't be resolved after `8.8.8.8` answers, your local resolver cached a "not found" from before the record existed. Wait a minute, or flush it: macOS `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`, Linux `resolvectl flush-caches`.
 
 ---
 

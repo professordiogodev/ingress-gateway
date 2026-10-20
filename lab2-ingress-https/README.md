@@ -197,8 +197,10 @@ kubectl get secret ${STUDENT_NAME}-tls-secret -n lab2
 While the cert was being issued, external-dns was also creating a DNS record for your hostname. Check it's ready:
 
 ```bash
-nslookup ${STUDENT_NAME}.eks.ironlabs.online
+nslookup ${STUDENT_NAME}.eks.ironlabs.online 8.8.8.8
 ```
+
+> **Querying `8.8.8.8` directly** skips your laptop's DNS cache. If your browser or `curl` still says the host can't be resolved after `8.8.8.8` answers, your local resolver cached a "not found" from before the record existed. Wait a minute, or flush it: macOS `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`, Linux `resolvectl flush-caches`.
 
 ---
 
