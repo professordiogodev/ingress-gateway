@@ -11,6 +11,12 @@ set -euo pipefail
 EXTDNS_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/ExternalDNSRole-${CLUSTER_NAME}"
 HOSTED_ZONE_ID="Z042372728MB5VI4H04IG"   # ironlabs.online
 
+# external-dns watches HTTPRoutes, so the Gateway API CRDs must exist first —
+# otherwise it hangs forever waiting for the HTTPRoute informer to sync.
+# 04-install-gateway-api.sh re-applies the same CRDs, which is harmless.
+kubectl apply -f \
+  "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
+
 helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
 helm repo update external-dns
 
