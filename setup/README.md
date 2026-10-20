@@ -157,6 +157,8 @@ Installs external-dns into the `external-dns` namespace. It watches:
 
 It only touches records in `ironlabs.online`. With `policy=sync`, it deletes DNS records when the owning Ingress or Gateway is removed — so lab cleanup also cleans up DNS.
 
+Ownership is tracked with TXT records tagged with `txtOwnerId=$CLUSTER_NAME`. Because everyone shares the same `ironlabs.online` zone, each cluster only modifies or deletes records it created itself, so your external-dns never touches another student's records.
+
 ---
 
 ## Step 5 — Gateway API CRDs and NGINX Gateway Fabric
