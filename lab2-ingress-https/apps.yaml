@@ -13,7 +13,7 @@ data:
   index.html: |
     <!DOCTYPE html>
     <html>
-    <head><title>Secure WebApp</title></head>
+    <head><meta charset="utf-8"><title>Secure WebApp</title></head>
     <body style="background:#6200ea;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center">
         <h1>🔒 Secure WebApp</h1>

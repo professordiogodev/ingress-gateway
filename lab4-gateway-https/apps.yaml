@@ -13,7 +13,7 @@ data:
   index.html: |
     <!DOCTYPE html>
     <html>
-    <head><title>Secure Gateway App</title></head>
+    <head><meta charset="utf-8"><title>Secure Gateway App</title></head>
     <body style="background:#bf360c;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="text-align:center">
         <h1>🔐 Secure Gateway App</h1>
